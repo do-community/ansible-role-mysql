@@ -1,0 +1,110 @@
+---
+- name: Grab the SSL assets from one server
+  slurp:
+    src: "/var/lib/mysql/{{ item }}"
+  become: true
+  run_once: true
+  register: pki_certs
+  with_items:
+    - ca.pem
+    - ca-key.pem
+    - server-cert.pem
+    - server-key.pem
+    - client-cert.pem
+    - client-key.pem
+  tags:
+    - always
+
+- name: Write the SSL assets to the remaining servers
+  copy:
+    dest: "/var/lib/mysql/{{ item.item }}"
+    content: "{{ item.content | b64decode }}"
+    owner: mysql
+    group: mysql
+    mode: "0600"
+  no_log: true
+  become: true
+  with_items: "{{ pki_certs.results }}"
+
+- name: Find existing UUID if it exists
+  shell: >
+      grep "^loose-group_replication_group_name" /etc/mysql/mysql.cnf |
+      cut -d '"' -f2
+  run_once: true
+  changed_when: false
+  register: existing_cluster_uuid
+
+- name: Generate UUID incase no previous value was present
+  command: uuidgen
+  run_once: true
+  changed_when: false
+  register: new_cluster_uuid
+
+- name: Generate global mysql.cnf file for group replication
+  template:
+    src: mysql.cnf.j2
+    dest: /etc/mysql/mysql.cnf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  become: true
+  notify: Restart MySQL
+
+- name: Run handlers to reboot MySQL
+  meta: flush_handlers
+
+- name: Check if group replication is already enabled
+  shell: >
+     mysql -Nnrse "SELECT service_state
+     FROM performance_schema.replication_connection_status
+     WHERE channel_name = 'group_replication_applier'"
+  failed_when: false
+  changed_when: false
+  register: group_replication_running
+
+- name: Generate MySQL replication user script
+  template:
+    src: replication_user.sql.j2
+    dest: "/tmp/replication_user.sql"
+    mode: "0600"
+  when: "'ON' not in group_replication_running.stdout"
+
+- name: Set up replication user
+  mysql_db:
+    name: all
+    state: import
+    target: "/tmp/replication_user.sql"
+  when: "'ON' not in group_replication_running.stdout"
+
+- name: Bootstrap group replication on first node
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - "SET GLOBAL group_replication_bootstrap_group=ON"
+    - "START GROUP_REPLICATION"
+    - "SET GLOBAL group_replication_bootstrap_group=OFF"
+  when:
+    - "'ON' not in group_replication_running.stdout"
+    - inventory_hostname == ansible_play_hosts[0]
+
+- name: Begin group replication on remaining nodes
+  command: mysql -ne "START GROUP_REPLICATION"
+  when:
+    - "'ON' not in group_replication_running.stdout"
+    - inventory_hostname != ansible_play_hosts[0]
+
+- name: Mark primary master when using single primary mode
+  set_fact:
+    primary: true
+  when:
+    - not mysql_group_replication_multi_primary
+    - inventory_hostname == ansible_play_hosts[0]
+  tags:
+    - always
+
+- name: Mark all primaries when using multi-primary mode
+  set_fact:
+    primary: true
+  when: mysql_group_replication_multi_primary
+  tags:
+    - always

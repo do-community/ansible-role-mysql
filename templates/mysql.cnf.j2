@@ -1,0 +1,55 @@
+{%- set public_host_ips = ansible_play_hosts | map('extract', hostvars, ['ansible_eth0', 'ipv4', 'address']) | list -%}
+{%- set private_host_ips = ansible_play_hosts | map('extract', hostvars, ['ansible_eth1', 'ipv4', 'address']) | list -%}
+{%- set uuid = (existing_cluster_uuid.stdout | length > 0) | ternary(existing_cluster_uuid.stdout, new_cluster_uuid.stdout) -%}
+
+!includedir /etc/mysql/conf.d/
+!includedir /etc/mysql/mysql.conf.d/
+
+[mysqld]
+
+require_secure_transport={{ 1 if mysql_repl_require_ssl else 0 }}
+
+plugin-load=group_replication=group_replication.so
+
+# General replication settings
+gtid_mode = ON
+enforce_gtid_consistency = ON
+master_info_repository = TABLE
+relay_log_info_repository = TABLE
+binlog_checksum = NONE
+log_slave_updates = ON
+log_bin = binlog
+binlog_format = ROW
+transaction_write_set_extraction = XXHASH64
+loose-group_replication_bootstrap_group = OFF
+loose-group_replication_start_on_boot = OFF
+loose-group_replication_ssl_mode = REQUIRED
+loose-group_replication_recovery_use_ssl = 1
+
+# Shared replication group configuration
+loose-group_replication_group_name = "{{ uuid }}"
+{% if mysql_private_networking %}
+loose-group_replication_ip_whitelist = "{{ private_host_ips | join(',') }}"
+loose-group_replication_group_seeds = "{{ private_host_ips | zip_longest([], fillvalue=':33061') | map('join') | join(',') }}"
+{% else %}
+loose-group_replication_ip_whitelist = "{{ public_host_ips | join(',') }}"
+loose-group_replication_group_seeds = "{{ public_host_ips | zip_longest([], fillvalue=':33061') | map('join') | join(',') }}"
+{% endif %}
+
+# Single or Multi-primary mode? Uncomment these two lines
+# for multi-primary mode, where any host can accept writes
+{% if mysql_group_replication_multi_primary %}
+loose-group_replication_single_primary_mode = OFF
+loose-group_replication_enforce_update_everywhere_checks = ON
+{% else %}
+#loose-group_replication_single_primary_mode = OFF
+#loose-group_replication_enforce_update_everywhere_checks = ON
+{% endif %}
+
+# Host specific replication configuration
+server_id = {{ ansible_play_hosts.index(inventory_hostname) + 1 }}
+bind-address = "{{ ansible_eth1.ipv4.address if mysql_private_networking else ansible_eth0.ipv4.address }}"
+report_host = "{{ ansible_eth1.ipv4.address if mysql_private_networking else ansible_eth0.ipv4.address }}"
+loose-group_replication_local_address = "{{ ansible_eth1.ipv4.address if mysql_private_networking else ansible_eth0.ipv4.address }}:33061"
+disabled_storage_engines = MyISAM,BLACKHOLE,FEDERATED,CSV,ARCHIVE
+report_port = 3306

@@ -1,0 +1,15 @@
+---
+# package configuration
+mysql_upstream_package: false
+
+# What to configure
+mysql_group_replication: false
+mysql_group_replication_multi_primary: false
+
+mysql_proxysql_backend_config: false
+
+mysql_load_test_data: false
+
+# Transport security
+mysql_repl_require_ssl: false
+mysql_private_networking: false

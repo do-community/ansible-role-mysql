@@ -1,0 +1,22 @@
+---
+- name: Check if ProxySQL view already present
+  shell: mysql -Nnrse 'show full tables in sys where table_type like "view"'
+  changed_when: false
+  run_once: true
+  register: mysql_views
+
+- name: Copy ProxySQL views script
+  copy:
+    src: addition_to_sys.sql
+    dest: "/tmp/addition_to_sys.sql"
+    mode: "0600"
+  run_once: true
+  when: "'gr_member_routing_candidate_status' not in mysql_views.stdout"
+
+- name: Configure additional views for ProxySQL
+  mysql_db:
+    name: all
+    state: import
+    target: "/tmp/addition_to_sys.sql"
+  run_once: true
+  when: "'gr_member_routing_candidate_status' not in mysql_views.stdout"

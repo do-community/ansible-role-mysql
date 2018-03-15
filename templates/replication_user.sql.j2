@@ -1,0 +1,6 @@
+SET SQL_LOG_BIN=0;
+CREATE USER IF NOT EXISTS '{{ mysql_repl_user }}'@'%' IDENTIFIED BY '{{ mysql_repl_pass }}' REQUIRE SSL;
+GRANT REPLICATION SLAVE on *.* TO '{{ mysql_repl_user }}'@'%';
+FLUSH PRIVILEGES;
+SET SQL_LOG_BIN=1;
+CHANGE MASTER TO MASTER_USER='{{ mysql_repl_user }}', MASTER_PASSWORD='{{ mysql_repl_pass }}' FOR CHANNEL 'group_replication_recovery';

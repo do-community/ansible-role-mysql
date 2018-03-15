@@ -1,0 +1,93 @@
+---
+# tasks file for mysql
+- name: Check group replication option compatibility
+  assert:
+    that:
+      - mysql_upstream_package
+    msg: "Group replication requires the upstream MySQL package.  Set `mysql_upstream_package: true` to use group replication."
+  when: mysql_group_replication
+
+- name: Check ProxySQL option compatibility
+  assert:
+    that:
+      - mysql_upstream_package
+      - mysql_group_replication
+    msg: "ProxySQL requires group replication. Set `mysql_upstream_package: true` and `mysql_group_replication: true` to use ProxySQL."
+  when: mysql_proxysql_backend_config
+
+- import_tasks: upsteam_install.yml
+  when: mysql_upstream_package
+
+- name: Ensure MySQL installed
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+    state: present
+  register: new_mysql_install
+  with_items:
+    - mysql-server
+    - python-mysqldb
+
+- name: Ensure MySQL root password set
+  mysql_user:
+    name: root
+    password: "{{ mysql_root_pass }}"
+    check_implicit_admin: true
+  become: true
+
+- name: Ensure MySQL client configuration file present
+  template:
+    src: my.cnf.j2
+    dest: "~/.my.cnf"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+    mode: "0600"
+    backup: true
+
+- import_tasks: secure_installation.yml
+  when: new_mysql_install.changed
+
+- import_tasks: group_replication.yml
+  when: mysql_group_replication
+
+- name: Ensure MySQL databases are present
+  mysql_db:
+    name: "{{ item.name }}"
+    state: present
+  run_once: "{{ true if mysql_group_replication else false }}"
+  with_items: "{{ mysql_databases }}"
+  register: mysql_new_database
+  when: mysql_databases is defined
+
+- name: Copy MySQL database data
+  copy:
+    src: "{{ item.item.datafile }}"
+    dest: "/tmp/{{ item.item.datafile }}"
+    mode: "0600"
+  run_once: "{{ true if mysql_group_replication else false }}"
+  with_items: "{{ mysql_new_database.results }}"
+  when: item.changed == true and item.item.datafile is defined
+
+- name: Load MySQL database data
+  mysql_db:
+    name: "{{ item.item.name }}"
+    state: import
+    target: "/tmp/{{ item.item.datafile }}"
+  run_once: "{{ true if mysql_group_replication else false }}"
+  with_items: "{{ mysql_new_database.results }}"
+  when: item.changed == true and item.item.datafile is defined
+
+- name: Ensure MySQL users are present
+  mysql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    priv: "{{ item.priv }}"
+    host: "{{ item.host }}"
+    state: present
+  no_log: true
+  run_once: "{{ true if mysql_group_replication else false }}"
+  with_items: "{{ mysql_users }}"
+  when: mysql_users is defined
+
+- import_tasks: proxysql_backend.yml
+  when: mysql_proxysql_backend_config

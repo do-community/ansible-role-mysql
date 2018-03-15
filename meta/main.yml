@@ -1,0 +1,15 @@
+galaxy_info:
+  author: DigitalOcean Community
+  description: MySQL role with optional group replication and ProxySQL integration
+  company: DigitalOcean
+  license: MIT
+  min_ansible_version: 2.4
+  platforms:
+    - name: Ubuntu
+      versions:
+        - 16.04
+  galaxy_tags:
+    - mysql
+    - database
+    - replication
+dependencies: []

@@ -1,0 +1,19 @@
+---
+- name: Ensure upstream MySQL repositories installed
+  apt_repository:
+    repo: "{{ item }}"
+    state: present
+    filename: mysql
+  become: true
+  with_items:
+    - "deb http://repo.mysql.com/apt/ubuntu/ xenial mysql-apt-config"
+    - "deb http://repo.mysql.com/apt/ubuntu/ xenial mysql-5.7"
+    - "deb http://repo.mysql.com/apt/ubuntu/ xenial mysql-tools"
+    - "deb-src http://repo.mysql.com/apt/ubuntu/ xenial mysql-5.7"
+
+- name: Ensure upstream MySQL repository GPG key installed
+  apt_key:
+    keyserver: pool.sks-keyservers.net
+    id: A4A9406876FCBD3C456770C88C718D3B5072E1F5
+    state: present
+  become: true
